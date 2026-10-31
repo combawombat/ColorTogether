@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Color Together</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#faf7f2;--panel:#fff;--ink:#2b2a33;--mute:#77757f;--line:#e4dfd6;--acc:#6c5ce7}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1b22;--panel:#27262f;--ink:#f0eef5;--mute:#a09da9;--line:#3a3944;--acc:#9a8cff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 auto 0 0}
+button,label.btn{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover,label.btn:hover{border-color:var(--acc)}
+button.on{border-color:var(--acc);background:var(--acc);color:#fff}
+main{display:flex;flex-wrap:wrap;gap:12px;padding:12px;align-items:flex-start;justify-content:center}
+aside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;width:230px;max-width:100%}
+aside h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:12px 0 6px}
+aside h2:first-child{margin-top:0}
+.tools{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.pal{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.sw{aspect-ratio:1;border-radius:6px;border:2px solid transparent;cursor:pointer;padding:0}
+.sw.on{border-color:var(--ink);transform:scale(1.12)}
+input[type=range]{width:100%}
+input[type=color]{width:100%;height:34px;border:1px solid var(--line);border-radius:8px;background:none;padding:2px}
+#stage{flex:1 1 320px;max-width:900px;min-width:0}
+#wrap{position:relative;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;line-height:0;display:none}
+#wrap canvas{width:100%;height:auto;display:block}
+#draw{position:absolute;inset:0;mix-blend-mode:multiply;touch-action:none;cursor:crosshair}
+#empty{padding:60px 20px;text-align:center;color:var(--mute)}
+#status{font-size:13px;color:var(--mute);margin-top:8px}
+</style></head><body>
+<header>
+<h1>🎨 Color Together</h1>
+<label class="btn">Upload picture<input id="file" type="file" accept="image/*" hidden></label>
+<button id="undo">Undo</button>
+<button id="invite">Copy invite link</button>
+<button id="save">Download PNG</button>
+</header>
+<main>
+<aside>
+<h2>Brush</h2><div class="tools" id="tools"></div>
+<h2>Size <span id="sv"></span></h2><input id="size" type="range" min="2" max="80" value="14">
+<h2>Opacity</h2><input id="alpha" type="range" min="10" max="100" value="100">
+<h2>Colors</h2><div class="pal" id="pal"></div>
+<h2>Custom color</h2><input id="custom" type="color" value="#e84393">
+</aside>
+<div id="stage">
+<div id="wrap"><canvas id="base" width="900" height="600"></canvas><canvas id="draw" width="900" height="600"></canvas></div>
+<div id="empty">Upload a picture to start. Line drawings work great, since color blends over the lines.<br>Then press “Copy invite link” and send it to a friend to color together live.</div>
+<div id="status">Connecting…</div>
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const base=$('base'),dr=$('draw'),bx=base.getContext('2d'),dx=dr.getContext('2d');
+const COLORS=['#000000','#4a4a4a','#9e9e9e','#ffffff','#7b3f00','#c8864b','#f5d0a9','#ff9ff3','#e84393','#d63031','#ff7675','#e17055','#fd9644','#fdcb6e','#ffeaa7','#f1f500','#badc58','#6ab04c','#00b894','#10ac84','#55efc4','#00cec9','#74b9ff','#0984e3','#273c75','#6c5ce7','#a29bfe','#8e44ad','#2d3436','#b8e994','#81ecec','#fab1a0'];
+const TOOLS=[['pen','Pen'],['marker','Marker'],['crayon','Crayon'],['spray','Spray'],['soft','Soft'],['hl','Highlighter'],['eraser','Eraser']];
+let S={tool:'pen',color:'#e84393',size:14,alpha:1},W=900,H=600,hasImg=false;
+let code=(location.hash||'').slice(1);
+if(!code){code='room-'+Math.random().toString(36).slice(2,8);history.replaceState(null,'','#'+code)}
+let strokes=[],rendered=new Set(),mine=[],live={},cur=null;
+
+TOOLS.forEach(([k,n])=>{const b=document.createElement('button');b.textContent=n;b.dataset.k=k;b.onclick=()=>{S.tool=k;mark()};$('tools').appendChild(b)});
+COLORS.forEach(c=>{const b=document.createElement('button');b.className='sw';b.style.background=c;if(c==='#ffffff')b.style.borderColor='var(--line)';b.dataset.c=c;b.onclick=()=>{S.color=c;if(S.tool==='eraser')S.tool='pen';mark()};$('pal').appendChild(b)});
+function mark(){document.querySelectorAll('#tools button').forEach(b=>b.classList.toggle('on',b.dataset.k===S.tool));document.querySelectorAll('.sw').forEach(b=>b.classList.toggle('on',b.dataset.c===S.color));$('sv').textContent=S.size}
+$('size').oninput=e=>{S.size=+e.target.value;mark()};
+$('alpha').oninput=e=>{S.alpha=e.target.value/100};
+$('custom').oninput=e=>{S.color=e.target.value;if(S.tool==='eraser')S.tool='pen';mark()};
+mark();
+
+// ---- network ----
+let ws,retry=0;
+function connect(){
+  ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host);
+  ws.onopen=()=>{retry=0;ws.send(JSON.stringify({type:'join',room:code}));setStatus('Connected. Anyone with this page’s link colors along live.')};
+  ws.onclose=()=>{setStatus('Disconnected. Reconnecting…');setTimeout(connect,Math.min(5000,500*++retry))};
+  ws.onmessage=async ev=>{const m=JSON.parse(ev.data);
+    if(m.type==='init'){strokes=m.strokes||[];live={};if(m.img)await setImage(m.img);else redraw()}
+    else if(m.type==='image'){strokes=[];mine=[];live={};await setImage(m.img)}
+    else if(m.type==='live'){let s=live[m.id];
+      if(!s)s=live[m.id]={id:m.id,t:m.t,tool:m.tool,color:m.color,size:m.size,alpha:m.alpha,pts:[]};
+      s.pts.push(...m.pts);if(hasImg)paint(dx,{...s,pts:s.pts.slice(-(m.pts.length+2))})}
+    else if(m.type==='stroke'){const s=m.stroke;const was=!!live[s.id];delete live[s.id];
+      if(!strokes.some(x=>x.id===s.id)){strokes.push(s);strokes.sort((a,b)=>a.t-b.t);rendered.add(s.id);if(!was&&hasImg)paint(dx,s)}}
+    else if(m.type==='undo'){strokes=strokes.filter(s=>s.id!==m.id);delete live[m.id];redraw()}};
+}
+const send=o=>{if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))};
+connect();
+
+// ---- drawing ----
+function rng(seed){let s=seed%2147483647||1;return()=>(s=s*16807%2147483647)/2147483647}
+function paint(ctx,s){
+  const p=s.pts,n=p.length/2,sz=s.size*W/900,r=rng(s.t);
+  ctx.save();ctx.lineCap=ctx.lineJoin='round';ctx.globalAlpha=s.alpha;
+  ctx.strokeStyle=ctx.fillStyle=s.color;ctx.lineWidth=sz;
+  if(s.tool==='eraser')ctx.globalCompositeOperation='destination-out';
+  if(s.tool==='hl'){ctx.globalAlpha=Math.min(s.alpha,.4);ctx.lineCap='square';ctx.lineWidth=sz*1.6}
+  if(s.tool==='marker')ctx.globalAlpha=Math.min(s.alpha,.6);
+  if(s.tool==='soft'){ctx.shadowColor=s.color;ctx.shadowBlur=sz*.8}
+  const X=i=>p[i*2]/10000*W,Y=i=>p[i*2+1]/10000*W;
+  if(s.tool==='crayon'||s.tool==='spray'){
+    for(let i=0;i<n;i++){
+      const j=i?i-1:0,ddx=X(i)-X(j),ddy=Y(i)-Y(j),d=Math.hypot(ddx,ddy),steps=Math.max(1,Math.ceil(d/(sz/4)));
+      for(let k=0;k<steps;k++){
+        const x=X(j)+ddx*k/steps,y=Y(j)+ddy*k/steps,dots=s.tool==='spray'?6:5;
+        for(let q=0;q<dots;q++){const a=r()*6.283,rad=Math.sqrt(r())*sz/2,ds=s.tool==='spray'?Math.max(.6,sz/22):Math.max(1,sz/8);
+          ctx.globalAlpha=s.tool==='spray'?s.alpha*.8:s.alpha*(.4+r()*.6);
+          ctx.fillRect(x+Math.cos(a)*rad,y+Math.sin(a)*rad,ds,ds)}
+      }
+    }
+  }else{
+    ctx.beginPath();ctx.moveTo(X(0),Y(0));
+    if(n===1)ctx.lineTo(X(0)+.01,Y(0));
+    for(let i=1;i<n;i++)ctx.lineTo(X(i),Y(i));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function redraw(){dx.clearRect(0,0,W,H);rendered.clear();strokes.forEach(s=>{paint(dx,s);rendered.add(s.id)})}
+function pos(e){const b=dr.getBoundingClientRect();return[Math.round((e.clientX-b.left)/b.width*10000),Math.round((e.clientY-b.top)/b.width*10000)]}
+const meta=s=>({id:s.id,t:s.t,tool:s.tool,color:s.color,size:s.size,alpha:s.alpha});
+dr.addEventListener('pointerdown',e=>{if(!hasImg)return;dr.setPointerCapture(e.pointerId);
+  cur={id:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),t:Date.now(),tool:S.tool,color:S.color,size:S.size,alpha:S.alpha,pts:pos(e)};
+  paint(dx,cur);send({type:'live',...meta(cur),pts:cur.pts.slice()})});
+dr.addEventListener('pointermove',e=>{if(!cur)return;const q=pos(e),n=cur.pts.length;
+  if(Math.hypot(q[0]-cur.pts[n-2],q[1]-cur.pts[n-1])<8)return;
+  cur.pts.push(...q);paint(dx,{...cur,pts:cur.pts.slice(-4)});send({type:'live',...meta(cur),pts:q})});
+const end=()=>{if(!cur)return;const s=cur;cur=null;strokes.push(s);rendered.add(s.id);mine.push(s.id);send({type:'stroke',stroke:s})};
+dr.addEventListener('pointerup',end);dr.addEventListener('pointercancel',end);
+$('undo').onclick=()=>{const id=mine.pop();if(!id)return;strokes=strokes.filter(s=>s.id!==id);redraw();send({type:'undo',id})};
+
+// ---- image ----
+function setImage(url){return new Promise(res=>{const im=new Image();im.onload=()=>{W=im.naturalWidth;H=im.naturalHeight;
+  base.width=dr.width=W;base.height=dr.height=H;bx.fillStyle='#fff';bx.fillRect(0,0,W,H);bx.drawImage(im,0,0);
+  hasImg=true;$('empty').style.display='none';$('wrap').style.display='block';redraw();res()};im.src=url})}
+function shrink(file){return new Promise(res=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1400/Math.max(im.width,im.height)),w=Math.round(im.width*k),h=Math.round(im.height*k),c=document.createElement('canvas');c.width=w;c.height=h;
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);let q=.88,u=c.toDataURL('image/jpeg',q);
+  while(u.length>2000000&&q>.3){q-=.1;u=c.toDataURL('image/jpeg',q)}res(u)};im.src=URL.createObjectURL(file)})}
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;const u=await shrink(f);
+  strokes=[];mine=[];live={};await setImage(u);send({type:'image',img:u});setStatus('Picture uploaded. Copy the invite link to color together.')};
+
+$('invite').onclick=async()=>{try{await navigator.clipboard.writeText(location.href);setStatus('Link copied! Send it to your coloring partner.')}catch(e){prompt('Copy this link:',location.href)}};
+$('save').onclick=()=>{if(!hasImg)return;const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  x.drawImage(base,0,0);x.globalCompositeOperation='multiply';x.drawImage(dr,0,0);
+  c.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='colored-picture.png';a.click()})};
+function setStatus(t){$('status').textContent=t}
+</script></body></html>
