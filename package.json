@@ -1,0 +1,8 @@
+{
+  "name": "color-together",
+  "version": "1.0.0",
+  "description": "Upload a picture and color it together in real time",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}
